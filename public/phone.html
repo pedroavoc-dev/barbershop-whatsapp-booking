@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#FFFDF6">
+  <title>Magic Scissors · Phone simulator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Lora:ital,wght@1,500;1,600&display=swap">
+  <link rel="stylesheet" href="tokens.css?v=1">
+  <link rel="stylesheet" href="phone.css?v=1">
+  <script src="phone.js?v=1" defer></script>
+</head>
+<body class="sim-body">
+
+<header class="sim-top">
+  <div class="sim-top-inner">
+    <a class="brand" href="/">
+      <span class="pole" aria-hidden="true"><span class="pole-stripes"></span></span>
+      <span><span class="brand-name" id="shop-name">Magic Scissors</span><span class="brand-sub">Phone simulator</span></span>
+    </a>
+    <div class="sim-top-right">
+      <span class="sim-live" id="sim-live" data-state="off"><span class="sim-live-dot"></span><span class="sim-live-text">Connecting</span></span>
+      <a class="btn btn-ghost btn-sm" href="/">
+        <svg class="icon"><use href="icons/sprite.svg#layout-dashboard"/></svg><span class="hide-xs">Dashboard</span>
+      </a>
+    </div>
+  </div>
+  <div class="sim-band" aria-hidden="true"><span class="sim-band-stripes"></span></div>
+</header>
+
+<p class="sim-alert" id="sim-alert" role="alert" hidden>
+  <svg class="icon"><use href="icons/sprite.svg#triangle-alert"/></svg><span id="sim-alert-text"></span>
+</p>
+
+<!-- tabs: only visible on narrow screens -->
+<div class="sim-tabs" role="tablist" aria-label="Choose a phone">
+  <button class="sim-tab" role="tab" id="tab-customer" aria-controls="phone-customer" aria-selected="true" type="button">
+    <svg class="icon"><use href="icons/sprite.svg#smartphone"/></svg> Customer
+    <span class="tab-badge" id="badge-customer" hidden>0</span>
+  </button>
+  <button class="sim-tab" role="tab" id="tab-barber" aria-controls="phone-barber" aria-selected="false" type="button" tabindex="-1">
+    <svg class="icon"><use href="icons/sprite.svg#scissors"/></svg> Barber
+    <span class="tab-badge" id="badge-barber" hidden>0</span>
+  </button>
+</div>
+
+<main class="stage" id="stage" data-active="customer">
+
+  <!-- ───────── customer phone ───────── -->
+  <section class="phone" id="phone-customer" data-role="customer" role="tabpanel" aria-labelledby="tab-customer">
+    <div class="phone-controls">
+      <p class="phone-kicker"><svg class="icon icon-sm"><use href="icons/sprite.svg#user"/></svg> Customer's phone</p>
+      <div class="phone-pick">
+        <label class="sr-only" for="pick-customer">Customer number</label>
+        <span class="select-wrap">
+          <select id="pick-customer" class="select num"></select>
+          <svg class="icon select-caret" aria-hidden="true"><use href="icons/sprite.svg#chevron-down"/></svg>
+        </span>
+        <button class="btn btn-ghost btn-sm" id="new-customer" type="button" data-tip="A number the shop has never seen" data-tip-pos="below">
+          <svg class="icon"><use href="icons/sprite.svg#user-plus"/></svg> <span>New<span class="hide-xs">&nbsp;customer</span></span>
+        </button>
+      </div>
+    </div>
+
+    <div class="device">
+      <div class="screen">
+        <div class="statusbar" aria-hidden="true">
+          <span class="statusbar-time num" data-clock>--:--</span>
+          <span class="statusbar-notch"></span>
+          <span class="statusbar-num num" data-number></span>
+        </div>
+        <header class="chat-head">
+          <span class="avatar avatar-shop" aria-hidden="true"><span class="pole"><span class="pole-stripes"></span></span></span>
+          <span class="chat-head-text">
+            <span class="chat-head-name" data-shop>Magic Scissors</span>
+            <span class="chat-head-sub" data-sub>Business account</span>
+          </span>
+          <svg class="icon chat-head-badge" aria-hidden="true"><use href="icons/sprite.svg#badge-check"/></svg>
+        </header>
+        <div class="chat" data-chat role="log" aria-live="polite" aria-label="Chat with the shop" tabindex="0"></div>
+        <form class="composer" id="composer" autocomplete="off">
+          <label class="sr-only" for="composer-input">Message</label>
+          <input id="composer-input" class="composer-input" maxlength="1000" placeholder="Message" enterkeyhint="send">
+          <button class="composer-send" id="composer-send" type="submit" aria-label="Send" disabled>
+            <svg class="icon"><use href="icons/sprite.svg#send"/></svg>
+          </button>
+        </form>
+        <div class="sheet-backdrop" data-sheet-backdrop hidden></div>
+        <div class="sheet" data-sheet role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden>
+          <span class="sheet-grip" aria-hidden="true"></span>
+          <div class="sheet-head">
+            <button class="sheet-close" type="button" data-sheet-close aria-label="Close"><svg class="icon"><use href="icons/sprite.svg#x"/></svg></button>
+            <h2 class="sheet-title" id="sheet-title"></h2>
+          </div>
+          <p class="sheet-lead" data-sheet-lead></p>
+          <ul class="sheet-rows" data-sheet-rows></ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────── how to (desktop middle column) ───────── -->
+  <aside class="guide" aria-labelledby="guide-title">
+    <p class="eyebrow">Demo</p>
+    <h1 class="guide-title" id="guide-title">Book a cut, <em>watch it land.</em></h1>
+    <ol class="guide-steps">
+      <li><span class="guide-n">1</span><span>Say <strong>hi</strong> on the customer's phone and tap through the menu.</span></li>
+      <li><span class="guide-n">2</span><span>The barber's phone gets the <strong>New booking</strong> alert at once.</span></li>
+      <li><span class="guide-n">3</span><span>Use the dashboard's <strong>time machine</strong> to fire reminders and the morning summary.</span></li>
+    </ol>
+    <div class="guide-flow" aria-hidden="true">
+      <span class="flow-node"><svg class="icon"><use href="icons/sprite.svg#smartphone"/></svg></span>
+      <span class="flow-line"><span class="flow-dot"></span></span>
+      <span class="flow-node flow-node-shop"><span class="pole"><span class="pole-stripes"></span></span></span>
+      <span class="flow-line"><span class="flow-dot"></span></span>
+      <span class="flow-node"><svg class="icon"><use href="icons/sprite.svg#scissors"/></svg></span>
+    </div>
+    <a class="btn btn-primary guide-cta" href="/">
+      <svg class="icon"><use href="icons/sprite.svg#layout-dashboard"/></svg> Open the dashboard
+    </a>
+    <p class="guide-note"><svg class="icon icon-sm"><use href="icons/sprite.svg#info"/></svg>
+      <span>Fake numbers only (353 000…). Nothing leaves this server.</span></p>
+  </aside>
+
+  <!-- ───────── barber phone ───────── -->
+  <section class="phone" id="phone-barber" data-role="barber" role="tabpanel" aria-labelledby="tab-barber">
+    <div class="phone-controls">
+      <p class="phone-kicker"><svg class="icon icon-sm"><use href="icons/sprite.svg#scissors"/></svg> Barber's phone</p>
+      <div class="phone-pick">
+        <label class="sr-only" for="pick-barber">Barber</label>
+        <span class="select-wrap">
+          <select id="pick-barber" class="select" disabled><option>Loading…</option></select>
+          <svg class="icon select-caret" aria-hidden="true"><use href="icons/sprite.svg#chevron-down"/></svg>
+        </span>
+        <span class="tag tag-navy"><svg class="icon icon-sm"><use href="icons/sprite.svg#eye"/></svg> Read-only</span>
+      </div>
+    </div>
+
+    <div class="device">
+      <div class="screen">
+        <div class="statusbar" aria-hidden="true">
+          <span class="statusbar-time num" data-clock>--:--</span>
+          <span class="statusbar-notch"></span>
+          <span class="statusbar-num num" data-number></span>
+        </div>
+        <header class="chat-head">
+          <span class="avatar avatar-shop" aria-hidden="true"><span class="pole"><span class="pole-stripes"></span></span></span>
+          <span class="chat-head-text">
+            <span class="chat-head-name" data-shop>Magic Scissors</span>
+            <span class="chat-head-sub" data-sub>Shop alerts</span>
+          </span>
+          <svg class="icon chat-head-badge" aria-hidden="true"><use href="icons/sprite.svg#badge-check"/></svg>
+        </header>
+        <div class="banner" data-banner hidden>
+          <span class="banner-icon"><svg class="icon"><use href="icons/sprite.svg#bell"/></svg></span>
+          <span class="banner-text"><strong data-shop>Magic Scissors</strong><span data-banner-text></span></span>
+        </div>
+        <div class="chat" data-chat role="log" aria-live="polite" aria-label="What the barber receives" tabindex="0"></div>
+        <div class="readonly">
+          <svg class="icon"><use href="icons/sprite.svg#lock"/></svg>
+          <span>The barber only receives: bookings, cancellations, the morning summary and 30-minute pings.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+</body>
+</html>
