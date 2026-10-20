@@ -2,11 +2,15 @@
 //  - barber: daily summary before 10:00, and 30 min before each booking
 //  - customer: 1 hour before the booking
 //  - barber: instantly on every new or cancelled booking
-// Each reminder has a unique key in the `reminders` table, so restarts, overlapping
-// ticks or a fast-forwarded demo clock never send the same reminder twice.
+// Each reminder has a unique key in the `reminders` table: overlapping ticks, restarts
+// and a fast-forwarded demo clock don't repeat a reminder that was sent. Delivery is
+// at-least-once: if the process dies between Meta accepting a message and us recording
+// it, that one reminder can go out twice. A failed send is retried with backoff.
 import { iso, local, addMin, addDays, whenLabel, dayLabel } from './time.mjs'
 
-const MAX_ATTEMPTS = 3
+const RETRY_AFTER_MIN = [1, 2, 4, 8] // wait after attempt 1, 2, 3, 4; then give up (≈15 min of Meta outage)
+const MAX_ATTEMPTS = RETRY_AFTER_MIN.length + 1
+const TEMPLATE_PARAM_MAX = 1000 // Meta's limit per parameter is 1024 characters
 
 export function createReminders({ db, clock, config, bookings, wa, bus }) {
   const tz = config.timeZone
@@ -20,10 +24,11 @@ export function createReminders({ db, clock, config, bookings, wa, bus }) {
                                 WHERE b.active = 1 AND h.weekday = ? ORDER BY b.id`),
   }
 
-  // send once per key; a failed send is retried on later ticks, up to MAX_ATTEMPTS
+  // send once per key; a failed send is retried on later ticks with growing waits
   async function once(key, bookingId, sendFn) {
     const prev = q.reminder.get(key)
     if (prev && (prev.ok || prev.attempts >= MAX_ATTEMPTS)) return null
+    if (prev && clock.now() - new Date(prev.sent_at) < RETRY_AFTER_MIN[prev.attempts - 1] * 60000) return null
     q.claim.run(key, bookingId, iso(clock.now()))
     const r = await sendFn()
     q.result.run(r.ok ? 1 : 0, key)
@@ -74,24 +79,37 @@ export function createReminders({ db, clock, config, bookings, wa, bus }) {
         : `☀️ Good morning ${barber.name}! ${dayLabel(l.date)}: no bookings yet. New ones will come straight to you.`
       // template parameters can't contain line breaks, so the list is joined with " | "
       await once(`barber_day:${barber.id}:${l.date}`, null, () => wa.send(barber.phone, { kind: 'text', text },
-        { name: 'barber_daily_summary', params: [barber.name, dayLabel(l.date), String(list.length), lines.join(' | ') || 'none yet'] }))
+        { name: 'barber_daily_summary', params: [barber.name, dayLabel(l.date), String(list.length), fitParam(lines)] }))
     }
+  }
+
+  // a busy day can exceed Meta's parameter limit: keep whole lines and point to the dashboard
+  function fitParam(lines) {
+    if (!lines.length) return 'none yet'
+    let out = ''
+    for (let i = 0; i < lines.length; i++) {
+      const rest = `… and ${lines.length - i} more on the dashboard`
+      const next = out ? `${out} | ${lines[i]}` : lines[i]
+      if (next.length + rest.length + 3 > TEMPLATE_PARAM_MAX) return `${out} | ${rest}`
+      out = next
+    }
+    return out
   }
 
   let running = false
   async function tick() {
     if (running) return
     running = true
-    try {
-      const now = clock.now()
-      await dailySummaries(now)
-      await barberReminders(now)
-      await customerReminders(now)
-    } catch (err) {
-      console.error(`[reminders] ${err.stack || err.message}`)
-    } finally {
-      running = false
+    const now = clock.now()
+    // each routine on its own: a crash in one must not skip the others
+    for (const routine of [dailySummaries, barberReminders, customerReminders]) {
+      try {
+        await routine(now)
+      } catch (err) {
+        console.error(`[reminders] ${routine.name}: ${err.stack || err.message}`)
+      }
     }
+    running = false
   }
 
   // ───────── live notifications ─────────

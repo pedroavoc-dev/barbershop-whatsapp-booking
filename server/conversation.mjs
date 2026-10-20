@@ -120,11 +120,12 @@ export function createConversation({ db, clock, config, bookings, wa }) {
     const word = String(text || '').trim().toLowerCase()
 
     if (!replyId) {
-      if (state.step === 'name') return gotName(phone, state.data, text)
+      // commands first, so "cancel" typed at the name prompt cancels instead of becoming a name
       if (['menu', 'hi', 'hello', 'hey', 'start', 'restart'].includes(word)) return menu(phone)
       if (word === 'book') return askService(phone)
       if (['cancel', 'stop', 'exit'].includes(word) && state.step !== 'idle') return menu(phone, 'No problem, nothing was booked. Anything else?')
       if (['my bookings', 'bookings', 'mine'].includes(word)) return showMine(phone)
+      if (state.step === 'name') return gotName(phone, state.data, text)
       if (state.step === 'idle') return menu(phone)
       return say(phone, 'Please tap one of the options above, or reply *menu* to start again.')
     }

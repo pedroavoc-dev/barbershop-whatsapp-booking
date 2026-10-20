@@ -175,6 +175,7 @@ try {
   const sumA = thuSummary(BARBER_A), sumB = thuSummary(BARBER_B)
   check('09:30: Alex gets exactly one summary', sumA.length === 1)
   check('Blake gets exactly one, listing his 15:00 booking', sumB.length === 1 && /15:00 Skin fade/.test(sumB[0].body.params[3]), JSON.stringify(sumB[0]?.body))
+  check('canary: a short list is sent whole, not truncated', !/more on the dashboard/.test(sumB[0]?.body.params[3]))
   check('canary: summary is per day — none on Wednesday for Blake (day off)', !db.prepare(`SELECT 1 FROM reminders WHERE key = 'barber_day:2:2026-10-21'`).get())
 
   // ═════════ 7. dashboard API ═════════
@@ -212,6 +213,32 @@ try {
   const msgs = await call('GET', '/api/messages', undefined, { cookie: owner.cookie })
   check('message log masks phone numbers', msgs.body.messages.every((m) => /^…\d{4}$/.test(m.phone)))
   check('barber cannot read the message log', (await call('GET', '/api/messages', undefined, { cookie: blake.cookie })).status === 403)
+  const live = await fetch(BASE + '/api/events', { headers: { cookie: blake.cookie } })
+  const reader = live.body.getReader()
+  const firstChunk = new TextDecoder().decode((await reader.read()).value)
+  check('live feed opens for a logged-in barber', live.status === 200 && firstChunk.includes('hello'))
+  await call('POST', '/api/logout', {}, { cookie: blake.cookie, 'x-csrf': blake.csrf })
+  app.http.push('ping', {})
+  const afterLogout = await Promise.race([reader.read(), new Promise((r) => setTimeout(() => r({ timeout: true }), 1000))])
+  check('logging out closes the live feed (no more bookings leak to that tab)', afterLogout.done === true, JSON.stringify(afterLogout))
+  const ownerLive = await fetch(BASE + '/api/events', { headers: { cookie: owner.cookie } })
+  const ownerReader = ownerLive.body.getReader()
+  await ownerReader.read()
+  app.http.push('ping', { canary: 1 })
+  const stillOpen = await Promise.race([ownerReader.read(), new Promise((r) => setTimeout(() => r({ timeout: true }), 1000))])
+  check('canary: a logged-in owner keeps receiving events', !stillOpen.done && new TextDecoder().decode(stillOpen.value || new Uint8Array()).includes('canary'))
+  await ownerReader.cancel()
+
+  const CUST_4 = '353000000915'
+  await say(CUST_4, 'book'); await tap(CUST_4, 'svc:1'); await tap(CUST_4, 'brb:any'); await tap(CUST_4, 'day:2026-10-23')
+  await tap(CUST_4, rowsOf(last(CUST_4))[0])
+  check('new customer reaches the name prompt', /name/i.test(last(CUST_4)?.body?.text || ''))
+  await say(CUST_4, 'Cancel')
+  check('"cancel" at the name prompt cancels instead of becoming the name', /nothing was booked/.test(last(CUST_4)?.body?.text || '') && !db.prepare('SELECT 1 FROM customers WHERE phone = ?').get(CUST_4))
+  await tap(CUST_4, 'menu:book'); await tap(CUST_4, 'svc:1'); await tap(CUST_4, 'brb:any'); await tap(CUST_4, 'day:2026-10-23'); await tap(CUST_4, rowsOf(last(CUST_4))[0])
+  await say(CUST_4, 'Grace')
+  check('canary: a real name is accepted', /Grace/.test(last(CUST_4)?.body?.text || ''))
+
   check('demo clock route is off outside demo mode', (await call('POST', '/api/demo/clock', { advanceMin: 60 }, { cookie: owner.cookie, 'x-csrf': owner.csrf })).status === 404)
   check('webhook is off in simulator mode', (await call('POST', '/webhook', {})).status === 404)
 
@@ -250,6 +277,45 @@ try {
   check('outside the 24h window a real template payload is sent', tpl?.type === 'template' && tpl.template.name === 'barber_upcoming' && tpl.template.components[0].parameters.length === 4, JSON.stringify(tpl))
   const noTpl = await cloud.wa.send(BARBER_A, { kind: 'text', text: 'free text' })
   check('canary: free text outside the window is refused, not sent', !noTpl.ok && sent.filter((s) => s.body.text?.body === 'free text').length === 0)
+  for (const p of ['/sim/phones', '/sim/messages?phone=353000000911']) check(`simulator ${p} is off in cloud mode`, (await fetch(CB + p)).status === 404)
+  check('simulator send is off in cloud mode', (await fetch(CB + '/sim/send', { method: 'POST', body: '{"phone":"353000000911","text":"hi"}' })).status === 404)
+
+  section('reminder retries when Meta is down (cloud, fake Graph API)')
+  // Fri 23 Oct: Alex works 09:00–17:00 and has a packed day of 60 bookings
+  cloud.db.prepare('INSERT INTO working_hours VALUES (1, 5, ?, ?)').run('09:00', '17:00')
+  for (let i = 0; i < 60; i++) {
+    cloud.db.prepare('INSERT INTO customers (phone, name, created_at) VALUES (?, ?, ?)').run(`3530000005${String(i).padStart(2, '0')}`, `Kid Number ${i}`, '2026-10-01T00:00:00.000Z')
+    const start = toUtc('2026-10-23', `${String(9 + Math.floor(i / 8)).padStart(2, '0')}:${String((i % 8) * 7).padStart(2, '0')}`, TZ)
+    cloud.db.prepare(`INSERT INTO bookings (customer_id, barber_id, service_id, starts_at, ends_at, source, created_at) VALUES (?, 1, 1, ?, ?, 'whatsapp', ?)`)
+      .run(i + 1, iso(start), iso(new Date(start.getTime() + 60000)), '2026-10-01T00:00:00.000Z')
+  }
+  let metaDown = true
+  const tries = () => sent.filter((s) => s.body.template?.name === 'barber_daily_summary').length
+  const sumKey = 'barber_day:1:2026-10-23'
+  const row = () => cloud.db.prepare('SELECT ok, attempts FROM reminders WHERE key = ?').get(sumKey)
+  // swap the transport: fail while metaDown, succeed afterwards
+  const cloud2 = createApp({ config: cloudCfg, clock, dbFile: join(dir, 'cloud.db'),
+    fetchImpl: async (url, opts) => { sent.push({ url, body: JSON.parse(opts.body) }); return metaDown ? new Response('{"error":{"message":"down"}}', { status: 500 }) : new Response('{"messages":[{"id":"ok"}]}', { status: 200 }) } })
+  const before = tries()
+  clock.set(toUtc('2026-10-23', '09:30', TZ)); await cloud2.reminders.tick()
+  check('1st attempt fails and is recorded', row()?.ok === 0 && row()?.attempts === 1 && tries() === before + 1)
+  await cloud2.reminders.tick(); await cloud2.reminders.tick()
+  check('no hammering: next ticks inside the 1-min backoff send nothing', tries() === before + 1)
+  clock.advance(1); await cloud2.reminders.tick()
+  check('retried after 1 min', row()?.attempts === 2 && tries() === before + 2)
+  metaDown = false
+  clock.advance(1); await cloud2.reminders.tick()
+  check('canary: still waiting (backoff is now 2 min)', row()?.attempts === 2)
+  clock.advance(1); await cloud2.reminders.tick(); await cloud2.reminders.tick()
+  check('Meta back up → delivered, marked ok, not repeated', row()?.ok === 1 && row()?.attempts === 3 && tries() === before + 3)
+  const param = sent.filter((s) => s.body.template?.name === 'barber_daily_summary').at(-1).body.template.components[0].parameters[3].text
+  check('60-booking day fits Meta\'s 1024-char parameter limit', param.length <= 1024 && /more on the dashboard$/.test(param), `${param.length} chars`)
+  metaDown = true
+  for (let i = 0; i < 40; i++) { clock.advance(1); await cloud2.reminders.tick() }
+  const g = cloud2.db.prepare(`SELECT MAX(attempts) AS max, MIN(attempts) AS min, SUM(ok) AS ok FROM reminders WHERE key LIKE 'customer_1h:%'`).get()
+  check('a reminder that keeps failing gives up after 5 attempts, never more', g?.max === 5 && g.ok === 0, JSON.stringify(g))
+  check('…and stops earlier if the appointment has already started', g?.min < 5, JSON.stringify(g))
+  cloud2.db.close()
   cloud.http.server.close(); cloud.db.close()
 } catch (err) {
   failed++

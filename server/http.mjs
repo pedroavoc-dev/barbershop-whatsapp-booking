@@ -29,19 +29,24 @@ export async function hashPassword(password) {
   const h = await scrypt(password, salt, 64)
   return `scrypt$${salt.toString('hex')}$${h.toString('hex')}`
 }
-async function checkPassword(password, stored) {
+export async function checkPassword(password, stored) {
   const [, saltHex, hHex] = stored.split('$')
   const h = await scrypt(password, Buffer.from(saltHex, 'hex'), 64)
   return timingSafeEqual(h, Buffer.from(hHex, 'hex'))
 }
 
 export function createHttp({ db, clock, config, bookings, wa, conversation, reminders, bus }) {
-  const streams = new Set() // { res, barberId }
+  const streams = new Set() // { res, token, barberId }
   const attempts = new Map()
 
+  // the session is re-checked on every event: logging out (or a reset password)
+  // closes the live feed instead of leaking bookings to a stale tab
   function push(event, data, barberId = null) {
     const line = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
-    for (const s of streams) if (!barberId || !s.barberId || s.barberId === barberId) s.res.write(line)
+    for (const s of streams) {
+      if (!sessionByToken(s.token)) { s.res.end(); streams.delete(s); continue }
+      if (!barberId || !s.barberId || s.barberId === barberId) s.res.write(line)
+    }
   }
   for (const ev of ['booking:created', 'booking:cancelled', 'booking:updated']) {
     bus.on(ev, (b) => push('booking', { type: ev.split(':')[1], booking: b }, b.barber_id))
@@ -50,14 +55,20 @@ export function createHttp({ db, clock, config, bookings, wa, conversation, remi
   setInterval(() => push('ping', { now: iso(clock.now()) }), 20000).unref()
 
   // ───────── session ─────────
-  function readSession(req) {
-    const token = /(?:^|;\s*)session=([a-f0-9]{64})/.exec(req.headers.cookie || '')?.[1]
-    if (!token) return null
-    const s = db.prepare(`SELECT s.token, s.csrf, s.expires_at, u.login, u.barber_id FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`).get(token)
+  const sessionQuery = db.prepare(`SELECT s.token, s.csrf, s.expires_at, u.login, u.barber_id FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?`)
+  function sessionByToken(token) {
+    const s = token && sessionQuery.get(token)
     return s && s.expires_at > new Date().toISOString() ? s : null
   }
-  const locked = (k) => { const t = attempts.get(k); return !!t && Date.now() - t.since < 15 * 60e3 && t.n >= 5 }
-  const failed = (k) => { const t = attempts.get(k); if (!t || Date.now() - t.since > 15 * 60e3) attempts.set(k, { n: 1, since: Date.now() }); else t.n++ }
+  const readSession = (req) => sessionByToken(/(?:^|;\s*)session=([a-f0-9]{64})/.exec(req.headers.cookie || '')?.[1])
+
+  // login rate limit: 5 tries per (ip, login) per 15 min, and 20 per ip across all logins
+  const locked = (k) => { const t = attempts.get(k); return !!t && Date.now() - t.since < 15 * 60e3 && t.n >= (k.includes('|') ? 5 : 20) }
+  function failed(k) {
+    if (attempts.size > 10_000) for (const [key, t] of attempts) if (Date.now() - t.since > 15 * 60e3) attempts.delete(key)
+    const t = attempts.get(k)
+    if (!t || Date.now() - t.since > 15 * 60e3) attempts.set(k, { n: 1, since: Date.now() }); else t.n++
+  }
 
   // a barber only sees and changes their own bookings; the owner (barber_id NULL) sees all
   const mine = (session, b) => b && (!session.barber_id || session.barber_id === b.barber_id)
@@ -70,11 +81,11 @@ export function createHttp({ db, clock, config, bookings, wa, conversation, remi
 
     'POST /api/login': async ({ body, ip, res }) => {
       const key = `${ip}|${String(body.login || '').slice(0, 30)}`
-      if (locked(key)) return fail(429, 'too many attempts, wait 15 minutes')
+      if (locked(key) || locked(ip)) return fail(429, 'too many attempts, wait 15 minutes')
       const u = db.prepare('SELECT * FROM users WHERE login = ?').get(String(body.login || ''))
       // check even without a user, so response time doesn't reveal which logins exist
       const ok = await checkPassword(String(body.password || ''), u?.password_hash || 'scrypt$00$' + '00'.repeat(64)).catch(() => false)
-      if (!u || !ok) { failed(key); return fail(401, 'wrong login or password') }
+      if (!u || !ok) { failed(key); failed(ip); return fail(401, 'wrong login or password') }
       attempts.delete(key)
       const token = randomBytes(32).toString('hex'), csrf = randomBytes(32).toString('hex')
       db.prepare('INSERT INTO sessions (token, user_id, csrf, expires_at) VALUES (?, ?, ?, ?)')
@@ -203,7 +214,8 @@ export function createHttp({ db, clock, config, bookings, wa, conversation, remi
   const server = createServer(async (req, res) => {
     for (const [k, v] of Object.entries(HEADERS)) res.setHeader(k, v)
     const url = new URL(req.url, 'http://local')
-    const ip = (config.trustProxy && String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()) || req.socket.remoteAddress
+    // the proxy appends the address it saw to the END of X-Forwarded-For; the start is client-controlled
+    const ip = (config.trustProxy && String(req.headers['x-forwarded-for'] || '').split(',').at(-1).trim()) || req.socket.remoteAddress
     try {
       if (url.pathname === '/webhook') return await webhook(req, res, url)
 
@@ -222,7 +234,7 @@ export function createHttp({ db, clock, config, bookings, wa, conversation, remi
         if (!session) return send(res, 401, { error: 'log in first' })
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' })
         res.write(`event: hello\ndata: ${JSON.stringify({ now: iso(clock.now()) })}\n\n`)
-        const s = { res, barberId: session.barber_id }
+        const s = { res, token: session.token, barberId: session.barber_id }
         streams.add(s)
         req.on('close', () => streams.delete(s))
         return

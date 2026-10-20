@@ -13,14 +13,14 @@ Built for a kids' barbershop in Ireland (Magic Scissors) as a portfolio project.
 
 **Barber, on WhatsApp**
 - An alert for every new or cancelled booking, the moment it happens.
-- A **daily summary before 10:00** (09:30 by default) with the day's list.
+- A **daily summary at 09:30** (configurable, must be before 10:00) with the day's list. If the server was down at 09:30, it still goes out late, until noon.
 - A ping **30 minutes before** each appointment.
 
 **Barber and owner, on the dashboard**
 - Live timeline of the day, one column per barber. It updates without refreshing (Server-Sent Events).
 - Book phone calls and walk-ins. The customer still gets a WhatsApp confirmation.
 - Cancel (the customer is told), mark done or no-show, see the day's numbers.
-- The owner sees every barber and the log of WhatsApp messages sent. A barber sees only their own bookings.
+- The owner sees every barber and the log of WhatsApp messages. "Sent" in the log means the API accepted the message; delivery receipts are not read yet. A barber sees only their own bookings. Logging out closes the live feed.
 - **Demo "time machine"**: moves the server clock forward so you can watch reminders fire without waiting an hour.
 
 ## Try it
@@ -48,9 +48,9 @@ WhatsApp ──► /webhook ──► conversation.mjs ──► booking.mjs ─
 
 | File | Job |
 |---|---|
-| `server/booking.mjs` | Free slots (opening hours, lunch breaks, notice, overlap); create/cancel inside one write transaction so a slot is never sold twice |
+| `server/booking.mjs` | Free slots (opening hours, lunch breaks, notice, overlap). Create and cancel re-check availability inside one write transaction (`BEGIN IMMEDIATE`), so even several server processes on the same database can't sell a slot twice |
 | `server/conversation.mjs` | The chat flow as a state machine; every button carries its own value, so tapping an old message still works |
-| `server/reminders.mjs` | Daily summary, 30-min and 1-hour reminders, live alerts; a unique key per reminder means restarts never send duplicates |
+| `server/reminders.mjs` | Daily summary, 30-min and 1-hour reminders, live alerts; a unique key per reminder, retries with backoff |
 | `server/whatsapp.mjs` | Meta Cloud API client, webhook signature check, 24-hour-window rule, simulator transport |
 | `server/http.mjs` | Dashboard API, login, CSRF, SSE, webhook endpoint |
 | `server/time.mjs` | Injectable clock and Europe/Dublin conversions, including the summer-time switch |
@@ -62,13 +62,16 @@ WhatsApp ──► /webhook ──► conversation.mjs ──► booking.mjs ─
   - The webhook rejects anything without a valid `X-Hub-Signature-256` (HMAC with the app secret).
   - Meta's retries are de-duplicated by message id.
   - A customer can only see or cancel their **own** bookings, even if they forge a button id.
-  - Dashboard logins use scrypt hashes, an HttpOnly + SameSite=Strict cookie, a CSRF token on every POST, an origin check and a rate limit.
-  - A strict Content-Security-Policy blocks inline scripts.
+  - Dashboard logins use scrypt hashes, an HttpOnly + SameSite=Strict cookie, a CSRF token on every POST, an origin check and a rate limit (per login and per IP).
+  - A strict Content-Security-Policy blocks inline scripts; the front end never puts server data into `innerHTML`.
+  - The simulator routes don't exist in cloud mode, and the server refuses to start in cloud mode while any login still has the demo password.
 - **No AI in the booking path.** Buttons are predictable, cheap and testable. Understanding free text ("can I come Friday after school?") with an LLM is the natural next layer, on top of these same booking rules.
-- **Reminders are idempotent.**
-  - Each reminder claims a unique key before sending.
-  - A failed send is retried up to 3 times and never repeated once it succeeds.
+- **Reminders: at-least-once, de-duplicated by key.**
+  - Each reminder claims a unique key before sending, so overlapping ticks and restarts don't repeat one that was sent.
+  - A failed send is retried after 1, 2, 4 and 8 minutes (about 15 minutes of Meta outage), then given up and left visible as failed. Retries stop once the appointment starts.
+  - Honest limit: if the process dies after Meta accepted a message but before it was recorded, that reminder can go out twice. Exactly-once would need Meta's delivery webhooks; a duplicate reminder was judged better than a missing one.
   - A booking made inside the reminder window doesn't get a redundant reminder.
+  - A busy day's summary is cut at Meta's 1024-character parameter limit, with "… and N more on the dashboard".
 
 ## Tests
 
@@ -76,33 +79,38 @@ WhatsApp ──► /webhook ──► conversation.mjs ──► booking.mjs ─
 npm run smoke
 ```
 
-The smoke test drives the real HTTP server on a throwaway database with a fake clock. It covers 78 checks:
-- the full chat booking;
-- double-booking races;
+The smoke test drives the real HTTP server on a throwaway database with a fake clock. It covers 96 checks:
+- the full chat booking, including "cancel" typed at the name prompt;
+- double booking (a taken or overlapping slot is refused; the next customer isn't offered it);
 - opening hours, lunch breaks and days off;
-- reminder timing and de-duplication;
-- the daily summary;
+- reminder timing, de-duplication, retry with backoff while Meta is down, and giving up;
+- the daily summary, including a 60-booking day that must fit Meta's limit;
 - the 24-hour rule;
 - forged cancels;
-- dashboard permissions and CSRF;
-- the Meta webhook (signature, retries, Cloud API payloads).
+- dashboard permissions, CSRF, and the live feed closing on logout;
+- the Meta webhook (signature, re-deliveries, Cloud API payloads) and the simulator being off in cloud mode.
 
-Every rule has a canary, a case where it must *not* fire, so a broken check can't silently pass.
+Rules are checked both ways: a positive case, plus a canary where the rule must *not* fire. Some protections were also removed on purpose in a copy of the code to confirm the tests catch it.
+
+Not tested here: two server processes racing on the same database (the transaction design covers it; the test runs one process), session expiry and the login rate limit.
 
 ## Going live (not done here)
 
 1. A WhatsApp Business number on the Meta Cloud API, then `WHATSAPP_MODE=cloud` and the `WA_*` settings in `.env` (see `.env.example`).
-2. Submit these **utility** templates in WhatsApp Manager. Parameters are numbered and must not contain line breaks.
+2. Create these **utility** templates in WhatsApp Manager. **Drafts, not yet submitted to Meta**: the wording may need changes at review. They are written to Meta's known rules: no variable at the very start or end, enough fixed words around the variables, no line breaks in parameters. The parameter order must stay as below, because the code fills them in that order.
 
-| Name | Body |
+| Name | Body (draft) |
 |---|---|
-| `booking_reminder` | Hi {{1}}, a reminder: {{2}} with {{3}} today at {{4}}. *(quick replies: "I'll be there", "I need to cancel")* |
-| `barber_upcoming` | In {{1}} min ({{2}}): {{3}} for {{4}}. |
-| `barber_daily_summary` | Good morning {{1}}! {{2}}: {{3}} bookings. {{4}} |
-| `barber_new_booking` | New booking: {{1}}, {{2}}, {{3}}. |
-| `barber_cancelled` | Cancelled: {{1}}, {{2}}, {{3}}. The slot is free again. |
-| `booking_confirmed` | You're booked: {{1}} with {{2}}, {{3}}. Reply "my bookings" to manage it. |
-| `booking_cancelled_by_shop` | Sorry, we had to cancel your {{1}} on {{2}}. Reply "book" to pick a new time. |
+| `booking_reminder` | Hi {{1}}, this is a reminder of your {{2}} with {{3}} today at {{4}}. Let us know if you can still make it. *(quick replies: "I'll be there", "I need to cancel")* |
+| `barber_upcoming` | Heads-up: in {{1}} minutes, at {{2}}, you have a {{3}} booked for {{4}}. Check the dashboard for details. |
+| `barber_daily_summary` | Good morning {{1}}! Here is your day for {{2}}, with {{3}} bookings so far: {{4}}. Have a great day. |
+| `barber_new_booking` | You have a new booking from {{1}} for a {{2}} on {{3}}. It is already on your dashboard. |
+| `barber_cancelled` | A booking was cancelled: {{1}}, {{2}} on {{3}}. That time is free again on your dashboard. |
+| `booking_confirmed` | Your booking is confirmed: {{1}} with {{2}} on {{3}}. Reply "my bookings" at any time to manage it. |
+| `booking_cancelled_by_shop` | We are sorry, but we had to cancel your {{1}} on {{2}}. Reply "book" to choose a new time. |
+
+   Also set `WA_API_VERSION` to a Graph API version Meta currently supports (the default in `config.mjs` is only a starting point).
 
 3. HTTPS in front of the server (`SECURE_COOKIE=1`). Create real logins with `node cli/create_user.mjs <login> [barber_id]`.
-4. Customer phone numbers are personal data under GDPR. Add a privacy notice to the first message and a retention policy for old messages before real use.
+4. WhatsApp lists hold at most 10 rows, so the chat shows up to 10 services and 9 barbers (plus "no preference"). A bigger shop needs the lists split into pages.
+5. Customer phone numbers are personal data under GDPR. Add a privacy notice to the first message and a retention policy for old messages before real use.
