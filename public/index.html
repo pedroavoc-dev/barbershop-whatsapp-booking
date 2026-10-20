@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#FFFDF6">
+  <title>Magic Scissors · Bookings</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Lora:ital,wght@1,500;1,600&display=swap">
+  <link rel="stylesheet" href="tokens.css?v=1">
+  <link rel="stylesheet" href="app.css?v=1">
+  <script src="app.js?v=1" defer></script>
+</head>
+<body>
+
+<!-- ───────── boot (before we know if there is a session) ───────── -->
+<div id="boot" class="boot" aria-live="polite">
+  <span class="pole pole-lg" aria-hidden="true"><span class="pole-stripes"></span></span>
+  <span class="sr-only">Loading</span>
+</div>
+
+<!-- ───────── login ───────── -->
+<main id="login" class="login" hidden>
+  <section class="login-art" aria-hidden="true">
+    <div class="login-art-inner">
+      <span class="pole pole-lg"><span class="pole-stripes"></span></span>
+      <p class="login-quote">Every chair, every booking,<br><em>right on time.</em></p>
+      <ul class="login-points">
+        <li><svg class="icon"><use href="icons/sprite.svg#message-circle"/></svg> Customers book on WhatsApp</li>
+        <li><svg class="icon"><use href="icons/sprite.svg#bell"/></svg> Reminders go out by themselves</li>
+        <li><svg class="icon"><use href="icons/sprite.svg#layout-dashboard"/></svg> The day, live, on every phone</li>
+      </ul>
+    </div>
+  </section>
+  <section class="login-panel">
+    <form id="login-form" class="login-form" novalidate>
+      <a class="brand" href="./">
+        <span class="pole" aria-hidden="true"><span class="pole-stripes"></span></span>
+        <span><span class="brand-name">Magic Scissors</span><span class="brand-sub">Bookings</span></span>
+      </a>
+      <h1 class="login-title">Sign in</h1>
+      <p class="login-lead">Staff dashboard for the shop's WhatsApp bookings.</p>
+      <label class="field">
+        <span class="field-label">Login</span>
+        <input id="login-user" name="login" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+      </label>
+      <label class="field">
+        <span class="field-label">Password</span>
+        <input id="login-pass" name="password" type="password" autocomplete="current-password" required>
+      </label>
+      <p id="login-error" class="form-error" role="alert" hidden></p>
+      <button id="login-btn" class="btn btn-primary btn-block" type="submit">
+        <svg class="icon"><use href="icons/sprite.svg#arrow-right"/></svg><span>Sign in</span>
+      </button>
+      <div id="demo-hint" class="demo-hint" hidden>
+        <p><svg class="icon icon-sm"><use href="icons/sprite.svg#info"/></svg> <strong>Demo.</strong> Password <code>demo1234</code> for every login. Tap one:</p>
+        <div class="demo-logins">
+          <button type="button" class="chip" data-login="owner"><svg class="icon icon-sm"><use href="icons/sprite.svg#store"/></svg> owner</button>
+          <button type="button" class="chip" data-login="aoife"><svg class="icon icon-sm"><use href="icons/sprite.svg#scissors"/></svg> aoife</button>
+          <button type="button" class="chip" data-login="cian"><svg class="icon icon-sm"><use href="icons/sprite.svg#scissors"/></svg> cian</button>
+          <button type="button" class="chip" data-login="niamh"><svg class="icon icon-sm"><use href="icons/sprite.svg#scissors"/></svg> niamh</button>
+        </div>
+      </div>
+    </form>
+  </section>
+</main>
+
+<!-- ───────── dashboard ───────── -->
+<div id="app" class="app" hidden>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="./">
+        <span id="top-pole" class="pole" data-still aria-hidden="true"><span class="pole-stripes"></span></span>
+        <span><span class="brand-name" id="shop-name">Magic Scissors</span><span class="brand-sub">Bookings</span></span>
+      </a>
+      <div class="topbar-right">
+        <div class="shop-clock" id="shop-clock" title="Shop time">
+          <svg class="icon"><use href="icons/sprite.svg#clock"/></svg>
+          <span class="shop-clock-time num" id="clock-time">--:--</span>
+          <span class="shop-clock-date" id="clock-date"></span>
+          <span class="tag tag-red" id="clock-shift" hidden></span>
+        </div>
+        <span class="live" id="live" data-state="off"><span class="live-dot"></span><span class="live-text">Offline</span></span>
+        <a class="btn btn-ghost btn-sm hide-sm" href="phone.html" id="sim-link" target="_blank" rel="noopener" hidden>
+          <svg class="icon"><use href="icons/sprite.svg#smartphone"/></svg> Phone simulator
+        </a>
+        <div class="who">
+          <span class="who-avatar" id="who-avatar" aria-hidden="true"></span>
+          <span class="who-name hide-sm" id="who-name"></span>
+          <button class="btn btn-ghost btn-icon" id="logout" type="button" aria-label="Sign out" data-tip="Sign out" data-tip-pos="left">
+            <svg class="icon"><use href="icons/sprite.svg#log-out"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <div class="band" aria-hidden="true"><span class="band-stripes" id="band"></span></div>
+  </header>
+
+  <main class="layout">
+    <section class="main-col" aria-labelledby="day-title">
+      <div class="dayhead">
+        <div class="dayhead-text">
+          <p class="eyebrow" id="day-eyebrow">Today</p>
+          <h1 id="day-title" class="day-title">&nbsp;</h1>
+        </div>
+        <div class="dayhead-actions">
+          <div class="daynav" role="group" aria-label="Change day">
+            <button class="btn btn-ghost btn-icon" id="day-prev" type="button" aria-label="Previous day"><svg class="icon"><use href="icons/sprite.svg#chevron-left"/></svg></button>
+            <button class="btn btn-ghost" id="day-today" type="button">Today</button>
+            <button class="btn btn-ghost btn-icon" id="day-next" type="button" aria-label="Next day"><svg class="icon"><use href="icons/sprite.svg#chevron-right"/></svg></button>
+          </div>
+          <button class="btn btn-primary hide-sm" id="new-booking" type="button">
+            <svg class="icon"><use href="icons/sprite.svg#calendar-plus"/></svg> New booking
+          </button>
+        </div>
+      </div>
+
+      <div class="stats" id="stats" aria-live="polite">
+        <article class="stat">
+          <span class="stat-icon stat-icon-navy"><svg class="icon"><use href="icons/sprite.svg#calendar"/></svg></span>
+          <div><p class="stat-label">Bookings</p><p class="stat-value num" id="st-count">–</p><p class="stat-sub" id="st-count-sub">&nbsp;</p></div>
+        </article>
+        <article class="stat">
+          <span class="stat-icon stat-icon-ok"><svg class="icon"><use href="icons/sprite.svg#euro"/></svg></span>
+          <div><p class="stat-label">Revenue (est.)</p><p class="stat-value num" id="st-rev">–</p><p class="stat-sub" id="st-rev-sub">&nbsp;</p></div>
+        </article>
+        <article class="stat stat-next">
+          <span class="stat-icon stat-icon-red"><svg class="icon"><use href="icons/sprite.svg#scissors"/></svg></span>
+          <div><p class="stat-label" id="st-next-label">Next up</p><p class="stat-value num" id="st-next">–</p><p class="stat-sub" id="st-next-sub">&nbsp;</p></div>
+        </article>
+        <article class="stat">
+          <span class="stat-icon stat-icon-warn"><svg class="icon"><use href="icons/sprite.svg#user-x"/></svg></span>
+          <div><p class="stat-label">Cancelled · no-show</p><p class="stat-value num" id="st-lost">–</p><p class="stat-sub" id="st-lost-sub">&nbsp;</p></div>
+        </article>
+      </div>
+
+      <section class="card schedule" aria-label="Schedule">
+        <div class="schedule-scroll" id="schedule-scroll">
+          <div class="schedule-grid" id="schedule"></div>
+        </div>
+      </section>
+    </section>
+
+    <aside class="side-col">
+      <section class="card machine" id="machine" hidden aria-labelledby="machine-title">
+        <div class="card-head">
+          <h2 id="machine-title"><svg class="icon"><use href="icons/sprite.svg#history"/></svg> Time machine</h2>
+          <span class="tag tag-red">Demo</span>
+        </div>
+        <div class="machine-body">
+          <svg class="dial" viewBox="0 0 120 120" aria-hidden="true">
+            <circle cx="60" cy="60" r="56" class="dial-face"/>
+            <g class="dial-ticks" id="dial-ticks"></g>
+            <line x1="60" y1="60" x2="60" y2="32" class="dial-hand dial-h" id="hand-h"/>
+            <line x1="60" y1="60" x2="60" y2="18" class="dial-hand dial-m" id="hand-m"/>
+            <circle cx="60" cy="60" r="4.5" class="dial-pin"/>
+          </svg>
+          <div class="machine-read">
+            <p class="machine-time num" id="mc-time">--:--</p>
+            <p class="machine-date" id="mc-date">&nbsp;</p>
+            <p class="machine-offset" id="mc-offset">Real time</p>
+          </div>
+        </div>
+        <div class="machine-btns" role="group" aria-label="Move the shop clock forward">
+          <button class="btn btn-ghost" type="button" data-advance="15"><svg class="icon"><use href="icons/sprite.svg#fast-forward"/></svg> 15 min</button>
+          <button class="btn btn-ghost" type="button" data-advance="60"><svg class="icon"><use href="icons/sprite.svg#fast-forward"/></svg> 1 hour</button>
+          <button class="btn btn-ghost" type="button" data-advance="1440"><svg class="icon"><use href="icons/sprite.svg#fast-forward"/></svg> 1 day</button>
+          <button class="btn btn-ghost" type="button" data-reset><svg class="icon"><use href="icons/sprite.svg#rotate-ccw"/></svg> Reset</button>
+        </div>
+        <p class="machine-note">Moves the server clock. Any reminder that falls due fires at once: watch the activity feed and the <a href="phone.html" target="_blank" rel="noopener">phone simulator</a>.</p>
+      </section>
+
+      <section class="card reminders" aria-labelledby="rem-title">
+        <div class="card-head"><h2 id="rem-title"><svg class="icon"><use href="icons/sprite.svg#bell"/></svg> Automatic reminders</h2></div>
+        <ol class="rem-list" id="rem-list"></ol>
+        <p class="rem-foot"><svg class="icon icon-sm"><use href="icons/sprite.svg#info"/></svg>
+          <span>WhatsApp only allows free text within 24 h of the person's last message. Outside that window these go out as Meta-approved templates.</span></p>
+      </section>
+
+      <section class="card feed" id="feed-card" hidden aria-labelledby="feed-title">
+        <div class="card-head">
+          <h2 id="feed-title"><svg class="icon"><use href="icons/sprite.svg#message-circle"/></svg> WhatsApp activity</h2>
+          <span class="tag" id="feed-count"></span>
+        </div>
+        <ol class="feed-list" id="feed" aria-live="polite"></ol>
+      </section>
+    </aside>
+  </main>
+
+  <button class="fab" id="fab" type="button" aria-label="New booking"><svg class="icon icon-lg"><use href="icons/sprite.svg#calendar-plus"/></svg></button>
+</div>
+
+<!-- ───────── booking details ───────── -->
+<dialog id="dlg-booking" class="dlg" aria-labelledby="bd-title">
+  <div class="dlg-inner">
+    <header class="dlg-head">
+      <div>
+        <p class="eyebrow" id="bd-when"></p>
+        <h2 id="bd-title"></h2>
+      </div>
+      <button class="btn btn-ghost btn-icon" type="button" data-close aria-label="Close"><svg class="icon"><use href="icons/sprite.svg#x"/></svg></button>
+    </header>
+    <dl class="bd-rows" id="bd-rows"></dl>
+    <p id="bd-error" class="form-error" role="alert" hidden></p>
+    <footer class="dlg-foot" id="bd-actions"></footer>
+  </div>
+</dialog>
+
+<!-- ───────── new booking ───────── -->
+<dialog id="dlg-new" class="dlg dlg-sheet" aria-labelledby="nb-title">
+  <form id="nb-form" class="dlg-inner" novalidate>
+    <header class="dlg-head">
+      <div>
+        <p class="eyebrow">Phone call or walk-in</p>
+        <h2 id="nb-title">New booking</h2>
+      </div>
+      <button class="btn btn-ghost btn-icon" type="button" data-close aria-label="Close"><svg class="icon"><use href="icons/sprite.svg#x"/></svg></button>
+    </header>
+    <div class="nb-body">
+      <fieldset class="nb-step">
+        <legend><span class="step-n">1</span> Service</legend>
+        <div class="opt-grid" id="nb-services"></div>
+      </fieldset>
+      <fieldset class="nb-step" id="nb-barber-step">
+        <legend><span class="step-n">2</span> Barber</legend>
+        <div class="opt-row" id="nb-barbers"></div>
+      </fieldset>
+      <fieldset class="nb-step">
+        <legend><span class="step-n">3</span> Day</legend>
+        <div class="day-strip" id="nb-days"></div>
+      </fieldset>
+      <fieldset class="nb-step">
+        <legend><span class="step-n">4</span> Free times</legend>
+        <div id="nb-slots" class="slots" aria-live="polite"></div>
+      </fieldset>
+      <fieldset class="nb-step">
+        <legend><span class="step-n">5</span> Customer</legend>
+        <div class="nb-customer">
+          <label class="field">
+            <span class="field-label">Name</span>
+            <input id="nb-name" name="name" autocomplete="off" maxlength="40" required>
+          </label>
+          <label class="field">
+            <span class="field-label">WhatsApp number</span>
+            <input id="nb-phone" name="phone" type="tel" inputmode="numeric" autocomplete="off" maxlength="18" placeholder="353…" aria-describedby="nb-phone-hint" required>
+            <span class="field-hint" id="nb-phone-hint">With country code, no + or spaces needed (353 for Ireland).</span>
+          </label>
+        </div>
+      </fieldset>
+    </div>
+    <p id="nb-error" class="form-error" role="alert" hidden></p>
+    <footer class="dlg-foot nb-foot">
+      <p class="nb-summary" id="nb-summary">Pick a service, a day and a time.</p>
+      <button class="btn btn-primary" id="nb-submit" type="submit" disabled>
+        <svg class="icon"><use href="icons/sprite.svg#send"/></svg> Book &amp; send WhatsApp
+      </button>
+    </footer>
+  </form>
+</dialog>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+</body>
+</html>
