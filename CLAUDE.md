@@ -1,6 +1,6 @@
 # Barbershop booking — project rules
 
-WhatsApp booking for a barbershop (portfolio project, styled for Magic Scissors). Not in production. Code, UI and messages in English.
+WhatsApp booking for a barbershop (portfolio project, designed for Magic Scissors, name used with permission). Not in production. Code, UI and messages in English.
 
 ## Stack
 Node 24 (built-in SQLite `node:sqlite`), no npm dependencies. Front end without a build step in `public/` (dashboard `index.html`, WhatsApp simulator `phone.html`).

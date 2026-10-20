@@ -1,5 +1,5 @@
 {
-  "name": "barbershop-booking",
+  "name": "barbershop-whatsapp-booking",
   "version": "0.1.0",
   "description": "WhatsApp booking for a barbershop: customers book in chat, barbers get alerts and reminders, live dashboard.",
   "type": "module",
